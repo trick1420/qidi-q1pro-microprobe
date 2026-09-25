@@ -1,175 +1,159 @@
-# gcode_macro.cfg — change log
+# Change reference
 
-QIDI Q1 Pro, BIQU MicroProbe conversion. Baseline is the config as Klipper
-parsed it on **2026-09-19** (pre-MicroProbe); current state is **2026-09-25**.
+Every change from the stock QIDI Q1 Pro configuration, and the reason for each. The
+`README.md` file explains how to make these changes. This file records what they are, so
+you can compare against your own machine or undo one of them.
 
-Derived by diffing `gcode_macro_CURRENT_2026-09-25.cfg` against the config dump
-in `klippy.log`, not from memory.
+Baseline is the configuration as QIDI shipped it, captured on 2026-09-19 before the
+MicroProbe conversion. Current state is 2026-09-25.
 
-**Totals:** 2 sections added · 7 modified · 5 removed · 41 unchanged
+Stock and pre-conversion copies of every file are in `config-backups/`.
 
-Backups live in `config-backups/`:
+## printer.cfg
 
-| file | what |
+### `[smart_effector]` — the piezo sensor
+
+| Setting | Stock | Now | Why |
+|---|---|---|---|
+| `x_offset` | `17.6` | `24` | Klipper applies one pair of offsets to whichever sensor is active. Only the MicroProbe probes the mesh, so these must be its offsets. Measure your own mount. |
+| `y_offset` | `4.4` | `10` | Same reason. |
+
+`pin: U_1:PC1` and `z_offset: 0.000001` do not change. The piezo wiring is untouched by
+this conversion.
+
+### `[qdprobe]` — now the MicroProbe
+
+| Setting | Stock | Now | Why |
+|---|---|---|---|
+| `pin` | `!gpio21` | `^!gpio21` | The MicroProbe needs the internal pull-up resistor. The inductive sensor did not. |
+| `activate_gcode` | absent | `probe_deploy` then `G4 P500` | Extends the pin before probing. The stock sensors had no moving parts. |
+| `deactivate_gcode` | absent | `probe_stow` | Retracts the pin afterwards. |
+| `deactivate_on_each_sample` | absent | `false` | Deploys once per probing run instead of once per sample. |
+
+`z_offset: 0.000001` does not change, and must not. `[qdprobe]` and `[smart_effector]`
+share one probe object, so a real value here gets applied twice and drives the nozzle
+into the plate.
+
+### `[output_pin probe_enable]` — new
+
+```ini
+[output_pin probe_enable]
+pin: gpio11
+value: 1
+```
+
+Controls the MicroProbe pin. `gpio11` is the second hotend fan header, which the Q1 Pro
+does not populate. `value: 1` starts the pin retracted, which the piezo needs.
+
+### `[bed_mesh]`
+
+`vibrate_gcode: Z_DOUDONG` is commented out. `Z_DOUDONG` conditions the piezo sensor
+before it measures. The MicroProbe probes the mesh and does not need it.
+
+### `[stepper_z]`
+
+`position_endstop` changed from `-0.2` to `-0.23`. This sets the Z frame between `G28`
+and `get_zoffset`, and `get_zoffset` overwrites it a moment later, so the value has no
+effect on printing. Klipper refuses to start without the line.
+
+### Includes
+
+`[include mesh_guard.cfg]` added, above the `#*# SAVE_CONFIG` marker. Anything below that
+marker is rewritten automatically, on every print.
+
+## gcode_macro.cfg
+
+### New macros
+
+```ini
+[gcode_macro probe_deploy]
+gcode:
+    SET_PIN PIN=probe_enable VALUE=0
+
+[gcode_macro probe_stow]
+gcode:
+    SET_PIN PIN=probe_enable VALUE=1
+```
+
+Swap the two `VALUE` numbers if your pin moves the wrong way.
+
+### `CLEAR_NOZZLE`
+
+| Change | Why |
 |---|---|
-| `gcode_macro_2023-10-16_16-57-12.cfg` | QIDI factory, 2023-10-11, 40 sections |
-| `gcode_macro_pre-microprobe_2026-09-19.cfg` | **drop-in revert target**, 53 sections |
-| `gcode_macro_CURRENT_2026-09-25.cfg` | as-is today |
-| `MERGED_pre-microprobe_2026-09-19.cfg` | all includes flattened — reference only, do NOT load |
-| `printer_*`, `Adaptive_Mesh_*`, `plr_*`, `mesh_guard_*`, `timelapse_*` | supporting files |
+| Wipe travel `X85` and `X65` becomes `X77` | `X65` collides with the MicroProbe |
+| Purge cut from `80 mm` to `30 mm` | Enough to clear ooze on a nozzle that is already clean |
+| `G92 E0` then `G1 E-2 F1800` after the purge | Relieves melt-zone pressure. Without it, PETG oozes after the wipe and forms a curl on the tip. |
+| `G4 P5000` before the first wipe | Lets the purge blob set so it snaps off rather than smearing |
+| First wipe at `180 °C`, second wipe at `140 °C` | Stock waits only for a `20 °C` drop, so it wipes at `230 °C` while PETG still flows, then oozes on the way down with nothing to catch it. The second pass removes that ooze. |
 
----
+`CLEAR_NOZZLE_PLR` gets the same treatment and an `M107` at the end. Stock leaves the
+part fan at full. It runs only when you resume after a power cut.
 
-## Added
+### `PRINT_START`
 
-### `[gcode_macro probe_deploy]` / `[gcode_macro probe_stow]`
-```
-probe_deploy:  SET_PIN PIN=probe_enable VALUE=0
-probe_stow:    SET_PIN PIN=probe_enable VALUE=1
-```
-Drive the MicroProbe pin. Called from `[probe] activate_gcode` / `deactivate_gcode`
-in `printer.cfg`. Verified correct by eye: pin extends on deploy, retracts on stow.
+Restructured. `CLEAR_NOZZLE` runs before `G29` rather than after `M109`, so the nozzle
+cools during meshing instead of making you wait. `VALIDATE_MESH` runs immediately after
+`G29`. An optional `SOAK` parameter adds a bed soak in seconds.
 
----
+### `G29`
 
-## Modified
+The `G28` call is now conditional:
 
-### `[gcode_macro PRINT_START]` — restructured
-- `set_zoffset` removed (macro no longer exists)
-- Nozzle pre-heats to `hotendtemp - 80` instead of `M104 S0`, so probing happens warm but not oozing
-- Optional `SOAK` parameter added (seconds of bed soak before homing)
-- `M141` chamber set moved to the top; chamber wait added after `M109`
-- **`VALIDATE_MESH` added after `G29`** (mesh guard)
-- `CLEAR_NOZZLE` moved to *before* `M109`, restoring QIDI's original order so the
-  macro's own cool-down isn't fighting the print-temp heat-up
-- Redundant park block before `CLEAR_NOZZLE` removed (the macro parks itself; leaving
-  it in triggered the `else` branch and added a spurious 5 mm lift)
-
-### `[homing_override]` — Z branch replaced
-Was: two `probe` calls sandwiched between `QIDI_PROBE_PIN_2` / `QIDI_PROBE_PIN_1`,
-with hardcoded `SET_KINEMATIC_POSITION Z=1.9` and `Z=-0.1`.
-
-Now:
-```
-G90
-G1 X120 Y120 F7800
-G28 Z
-G1 Z30 F480
-```
-`G28` inside `homing_override` does not recurse, so this runs Klipper's real homing
-against `probe:z_virtual_endstop` and applies the probe's `z_offset` properly.
-
-Also removed the stray `QIDI_PROBE_PIN_2` before `G28 Z` in the all-axes branch and
-the one on the macro's last line. Those were throwing `Unknown command` on every home.
-
-### `[gcode_macro G29]` — partially updated ⚠️
-`get_zoffset` calls removed from both branches.
-
-**Still broken.** It retains the old normalisation:
-```
-G1 X{120 - probe.x_offset} Y{120 - probe.y_offset}
-G1 Z10
-probe                 <- reference probe
-save_meshoffset
-BED_MESH_CALIBRATE PROFILE=kamp
-set_meshoffset        <- subtracts the reference a SECOND time
-```
-Klipper's `bed_mesh` already subtracts `probe.z_offset`. Under `[qdprobe]` that was
-`0.000001` so it didn't matter; with a real `z_offset` of 1.53 the correction is
-applied twice and the mesh comes out uniformly **−1.53**, which would drive the
-nozzle into the plate. Caught by the mesh guard on 09-25.
-
-Fix — delete the reference-probe block and both meshoffset calls:
-```
-BED_MESH_CLEAR
-G28
-BED_MESH_CALIBRATE PROFILE=kamp
-SAVE_VARIABLE VARIABLE=profile_name VALUE='"kamp"'
-SAVE_CONFIG_QD
+```ini
+{% if 'xyz' not in printer.toolhead.homed_axes %}
+    G28
+{% endif %}
 ```
 
-### `[gcode_macro CLEAR_NOZZLE]` — rewritten
-- `HOTEND` given a default of 250 (was required)
-- `G90` added before the Z35 lift
-- Purge cut from **80 mm to 30 mm**
-- Wipe passes converted to a `{% for %}` loop, 5 iterations
-- Wipe travel changed from X85↔X97 to **X77↔X97** (clears the MicroProbe)
-- `M106 P2 S0` removed in two places
-- **Second cooling stage removed** — the original finished with
-  `G1 Y120 / G1 X230 / TEMPERATURE_WAIT MAXIMUM=140`, cooling to 140 °C at a
-  different position. That's gone, so the blob is softer at the end than it used to be.
-- `M104 S0` + `TEMPERATURE_WAIT MAXIMUM={hotendtemp-20}` retained (these are what
-  actually make the wipe work — the heater is *off*, so 220 is where cooling starts,
-  not where it ends)
-- A `G4 P10000` dwell is present but **commented out** on that line
+`PRINT_START` already homes, so stock homes twice per print. The condition removes the
+duplicate and still lets you run `G29` on its own.
 
-Known outstanding: no retraction after the purge, so PETG oozes after the wipe.
-Optional fix — `G92 E0` then `G1 E-2 F1800` after the purge.
+### Unchanged
 
-### `[gcode_macro CLEAR_NOZZLE_PLR]` — same treatment
-Power-loss-recovery clean, invoked from the generated `.plr/plr.gcode`, not from config.
-- Wipes converted to a `{% for %}` loop, 6 iterations
-- `M400` + `M104 S0` + `TEMPERATURE_WAIT MAXIMUM={hotendtemp-20}` added
-- Keeps the 80 mm purge, which is right here — filament has sat cold in a hot nozzle
-- Still has **no `M107`**, so it exits with the part fan at full
+`get_zoffset`, `move_subzoffset`, `set_zoffset`, `save_zoffset`, `test_zoffset`,
+`homing_override`, `set_meshoffset`, `save_meshoffset`, and `Z_DOUDONG` are all stock.
 
-### `[gcode_macro M191]` — cosmetic
-Trailing `#MAXIMUM={s+1}` comment added. No behaviour change.
+Do not delete them. They are the piezo measurement path, and they work unmodified because
+`[qdprobe]` still provides `QIDI_PROBE_PIN_1` and `QIDI_PROBE_PIN_2`.
 
-### `[gcode_macro RESPOND_INFO]` — cosmetic
-`variable_s` renamed to `variable_S`. Klipper lowercases option names, so no
-behaviour change, but it's an unnecessary diff.
+## Adaptive_Mesh.cfg
 
----
+| Line | Setting | Stock | Now |
+|---|---|---|---|
+| 24 | `variable_margin_enable` | `False` | `True` |
+| 25 | `variable_margin_size` | `5` | `15` |
+| 168 | `variable_distance_to_object_y` | `10` | `5` |
 
-## Removed
+KAMP probes only the area your part occupies and draws the purge line outside it, so the
+purge prints on ground the printer never measured. These three settings extend the mesh
+15 mm past the part and move the purge to 5 mm from it.
 
-`get_zoffset` · `move_subzoffset` · `save_zoffset` · `set_zoffset` · `test_zoffset`
+Both of the first two are required. Line 62 forces `margin_size` to `0` whenever
+`margin_enable` is `False`.
 
-The entire nozzle-contact zero suite. Z=0 now comes from `[probe] z_offset` instead
-of being re-measured against the plate every print.
+## New files
 
-**Consequences:**
-- `z_offset` is now **nozzle-specific**. Any nozzle change, reseat, or deposit shifts
-  the first layer silently. Re-run calibration after any nozzle work.
-- The drift detector is gone. A 0.17 mm blob used to show up as a number in the log;
-  now it just ruins prints.
-- `PRINT_END` still calls `SAVE_ZOFFSET` → `Unknown command` on every print. Remove it.
-- `test_zoffset` was the manual gap check. Gone.
+`mesh_guard.cfg` reads the bed mesh after `G29` and stops the print if the numbers are
+implausible. A healthy mesh on this machine has a range of `0.03` to `0.17 mm`. One probe
+misfire produced a range of `1.175 mm` and a correction that lifted the nozzle `0.954 mm`
+off the plate.
 
----
+Default limits are range `0.80`, peak `0.60`, and step `0.25 mm`. A full-bed mesh
+legitimately reaches a peak of about `0.45`, so do not tighten these below `0.5`.
 
-## Related changes in `printer.cfg`
+## Measured values from the test machine
 
-| change | note |
-|---|---|
-| `[qdprobe]` → `[probe]` | pin `^!gpio21`, x_offset 24, y_offset 10 |
-| `[heater_fan hotend_fan2]` **removed** | header was unused; gpio11 freed for `[output_pin probe_enable]` |
-| `[stepper_z] position_endstop` removed | correct for a virtual endstop |
-| `z_offset` set by hand at line 434 | `SAVE_CONFIG` will not persist it — see below |
+Your numbers will differ. These show what a healthy result looks like.
 
----
+| Value | Reading | Where it comes from |
+|---|---|---|
+| MicroProbe standoff | `1.601 mm` | `Result is z=` from `get_zoffset`, every print |
+| Stowed pin clearance | `0.76 mm` | Feeler gauge under the pin at `Z0`, minus `0.07` |
+| Pin travel | `2.36 mm` | Standoff plus clearance |
+| Bed mesh range | `0.110 mm` | `MESH CHECK` console line |
+| Bed mesh peak | `0.083 mm` | `MESH CHECK` console line |
+| Piezo sample spread | `0.007 mm` | Five samples per `get_zoffset` run |
 
-## Open issues
-
-1. ~~`hotend_fan2`~~ — **resolved 2026-09-25.** The header was never populated on this
-   machine, which is why gpio11 was free to repurpose for `probe_enable`. No fan lost.
-2. ~~`PRINT_END` calls `SAVE_ZOFFSET`~~ — **resolved 2026-09-25**, call removed.
-3. **`G29` double-corrects the mesh.** `save_meshoffset` captures the reference probe
-   (1.5648) and `set_meshoffset` runs `ADD_Z_OFFSET_TO_BED_MESH ZOFFSET={0 - zoffset}`,
-   shifting the whole mesh by −1.5648 on top of the subtraction `BED_MESH_CALIBRATE`
-   already did. Fix: delete the reference-probe block and both meshoffset *calls*
-   (keep the macro definitions). Blocks printing.
-4. **`SAVE_CONFIG` does not persist `[probe] z_offset`** on this fork — three
-   calibrations (−1.030, 1.950, 1.530) all wrote `0.000`. Set it by hand at
-   `printer.cfg` line 434 and keep the `#*# [probe]` block deleted.
-   `SAVE_CONFIG_QD` during a print does *not* clobber it — verified.
-5. **Probe mount geometry.** Pin stroke is ~1.95 mm and that's the whole budget:
-   `deployed reach + stowed clearance = 1.95`. Currently 1.53 / 0.42 at a 2.75 mm
-   sanded plate. Target an even split — raise the probe seat ~0.75 mm from the
-   3 mm design for ~1.0 / ~0.95.
-6. **Restoring the piezo.** The MicroProbe went onto the old hall-sensor wiring, so
-   the piezo is still connected. `[qdprobe]` registers as `probe` and provides the
-   PIN_1/PIN_2 mux, so reverting to it would give both sensors — MicroProbe for mesh,
-   piezo for the nozzle zero. Blockers: `[qdprobe]` has no `activate_gcode` for
-   deploy/stow, and gpio11 is contested with `hotend_fan2`.
+Watch the standoff. It is measured on every print and written to `klippy.log`. A drop of
+more than about `0.1 mm` means something is on the nozzle tip.
