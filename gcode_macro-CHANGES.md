@@ -60,9 +60,11 @@ before it measures. The MicroProbe probes the mesh and does not need it.
 
 ### `[stepper_z]`
 
-`position_endstop` changed from `-0.2` to `-0.23`. This sets the Z frame between `G28`
-and `get_zoffset`, and `get_zoffset` overwrites it a moment later, so the value has no
-effect on printing. Klipper refuses to start without the line.
+`position_endstop` changed from `-0.2` to `-0.23` on the test machine, by an earlier edit
+unrelated to this conversion. The value differs between firmware versions and has no
+effect on printing: it sets the Z frame between `G28` and `get_zoffset`, and
+`get_zoffset` overwrites that frame a moment later. Keep whatever your machine has.
+Klipper refuses to start if the line is missing.
 
 ### Includes
 

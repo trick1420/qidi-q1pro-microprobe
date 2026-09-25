@@ -170,14 +170,19 @@ when the piezo probes, or the pin touches the plate before the nozzle does.
 
 ### Check the Z endstop
 
-Find `[stepper_z]` and confirm this line is present and not commented out:
+Find `[stepper_z]` and confirm that `position_endstop` is present and not commented out.
+Klipper refuses to start without it.
 
-```ini
-position_endstop: -0.23
-```
+**Keep whatever value your machine already has. Do not copy one from this guide.** The
+value differs between firmware versions: `0` on the 2023 release, `-0.2` on the 2025 one,
+and `-0.23` on the test machine after an unrelated earlier edit.
 
-Klipper refuses to start without it. Some MicroProbe guides tell you to comment it out,
-which is correct for a single `[probe]` section and wrong here.
+Any of them works, because the setting only defines the Z frame between `G28` and
+`get_zoffset`, and `get_zoffset` replaces that frame with a real measurement moments
+later.
+
+Some MicroProbe guides tell you to comment this line out. That is correct for a single
+`[probe]` section and wrong here.
 
 ## Step 3: add the deploy macros
 
