@@ -91,9 +91,13 @@ Connect the MicroProbe signal wire to the **existing inductive probe connector**
 toolhead. That connector is `gpio21`. Leave the piezo wiring alone; it runs to the main
 board on a different pin and this conversion never touches it.
 
-Connect the MicroProbe control wire to `gpio11`. On the Q1 Pro that header is labeled
-for a second hotend fan and is not populated, so the pin is free. Confirm this on your
-own machine: heat the nozzle above 50°C and check that both heatsink fans still spin.
+Connect the MicroProbe control wire to `gpio11`. QIDI's config declares a second hotend
+heatsink fan on that pin, as `[heater_fan hotend_fan2]`, but a stock Q1 Pro has only one
+heatsink fan fitted. The pin drives nothing, so it is free.
+
+If you added a second hotend fan yourself, `gpio11` is already in use. Find another free
+pin on the toolhead board. Do not take the pin from a fan that exists, or you lose half
+your hotend cooling and the nozzle jams partway through long prints.
 
 ## Step 2: edit printer.cfg
 
@@ -143,6 +147,13 @@ Three changes from the QIDI originals:
 
 Leave `z_offset: 0.000001` on both sections. That value is deliberate. The piezo sets the
 real zero at print time, so Klipper must not apply an offset of its own.
+
+### Remove the unused fan section
+
+Find `[heater_fan hotend_fan2]` in `printer.cfg` and delete it. It claims `gpio11`, and
+Klipper refuses to start if two sections claim the same pin.
+
+Skip this step if you fitted a second hotend fan and chose a different pin in step 1.
 
 ### Add the control pin
 

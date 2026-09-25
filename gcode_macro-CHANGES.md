@@ -34,6 +34,15 @@ this conversion.
 share one probe object, so a real value here gets applied twice and drives the nozzle
 into the plate.
 
+### `[heater_fan hotend_fan2]` — removed
+
+Stock declares a second hotend heatsink fan on `gpio11`. A stock Q1 Pro has only one
+heatsink fan fitted, so the section drives nothing. Removing it frees `gpio11` for the
+MicroProbe control pin, and Klipper refuses to start if two sections claim one pin.
+
+If you added a second hotend fan yourself, keep this section and pick a different pin for
+`probe_enable`.
+
 ### `[output_pin probe_enable]` — new
 
 ```ini
@@ -42,8 +51,7 @@ pin: gpio11
 value: 1
 ```
 
-Controls the MicroProbe pin. `gpio11` is the second hotend fan header, which the Q1 Pro
-does not populate. `value: 1` starts the pin retracted, which the piezo needs.
+Controls the MicroProbe pin. `value: 1` starts the pin retracted, which the piezo needs.
 
 ### `[bed_mesh]`
 
