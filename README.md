@@ -227,8 +227,33 @@ wrap the call inside `G29`:
 `CLEAR_NOZZLE` in `gcode_macro.cfg` wipes the nozzle by moving it left and right across
 a brush. The stock travel reaches `X65`, which collides with the MicroProbe.
 
-Change every `G1 X65` and `G1 X85` in `CLEAR_NOZZLE` to `G1 X77`. Verify the limit on
-your own machine by moving the toolhead there by hand before you run the macro.
+The factory macro cleans in three phases: fast shallow passes at `X85`, then **nine slow
+deep passes to `X65` at `F500`**, then fast passes again. The slow deep passes are what
+actually scrub the nozzle. Everything else is a wipe.
+
+`X65` is where the MicroProbe collides, so the deep scrub has to be shortened rather than
+removed. Find your own limit by stepping in with the probe stowed:
+
+```
+G28
+probe_stow
+G90
+G1 Z35 F900
+G1 X97 F15000
+G1 Y243 F15000
+G1 Y254 F800
+G1 X80 F1000
+G1 X77 F1000
+G1 X74 F1000
+```
+
+Stop when the probe is close to the wiper assembly. The test machine reaches **X73**.
+Change the `X65` in the deep-scrub passes to your number and leave the rest of the macro
+alone.
+
+**Losing that deep scrub is the real cost of this conversion.** Delete it instead of
+shortening it, as I did at first, and ooze bends over on the tip instead of shearing off —
+no amount of temperature tuning replaces it.
 
 ## Step 6: set the mount height
 
@@ -245,8 +270,18 @@ deployed reach + stowed clearance = pin travel
 - **Stowed clearance** is how far the pin sits above the nozzle when retracted. It must
   exceed the height of anything already printed, or the pin catches on the part.
 
-Aim for at least `1.0 mm` deployed and at least `0.6 mm` stowed. The test machine runs
-`1.60` and `0.76`.
+Aim for at least `1.0 mm` deployed and at least `0.6 mm` stowed. The final mount on the
+test machine measures:
+
+```
+deployed reach     1.391 mm
+stowed clearance   0.85 mm
+pin travel         2.24 mm
+```
+
+`stl/microprobe-mount-v6.stl` is that mount. Treat it as a starting point rather than a
+drop-in: nozzle length and how far the probe body seats in its clamp both move the result,
+and on the test machine reseating the same bracket shifted the reach by 0.14 mm.
 
 Raising the probe in its mount converts deployed reach into stowed clearance, one
 millimeter for one millimeter. If your mount clamps the probe body, set the height there
@@ -273,9 +308,18 @@ Run each step and check the result before moving on.
    That number is the MicroProbe's standoff, measured by the nozzle. Record it. On the
    test machine it is `-1.601`. Five samples should agree within about `0.01 mm`.
 
-5. **Check Z=0.** Send `G1 X120 Y120 F6000` then `G1 Z0 F300`. The nozzle sits `0.07 mm`
-   above the plate, because `get_zoffset` declares the contact point as `-0.07`. A
-   `0.05 mm` feeler gauge drags. Paper, at about `0.1 mm`, does not fit.
+5. **Check Z=0 against a gauge block.** Put a gauge block of known height on the plate at
+   the centre, then send `G1 X120 Y120 F6000` and `G1 Z<block height> F300`. The nozzle
+   touches the top of the block.
+
+   This is the single most valuable check in the process. A feeler gauge tells you how a
+   gap feels; a gauge block tells you whether the machine's idea of Z=0 matches the plate
+   surface, against a precision reference. On the test machine a 40 mm block confirmed it
+   to within a hundredth of a millimetre.
+
+   `get_zoffset` declares the nozzle contact point as `-0.07`. That value compensates for
+   how far the nozzle presses into the plate before the piezo registers force, so **Z=0
+   lands on the plate surface**, not above it.
 
 6. **Check the stowed clearance.** Send `probe_stow`, return to `Z0`, and slide feeler
    gauges under the **pin**. Subtract `0.07` from whatever fits.
@@ -303,11 +347,48 @@ add `VALIDATE_MESH` to `PRINT_START` immediately after `G29`.
 Anything below that `SAVE_CONFIG` line gets rewritten automatically, and this printer
 rewrites it on every print. Config you put there disappears.
 
+## Level the bed with Z_TILT_ADJUST
+
+The Q1 Pro drives its two Z motors independently, so Klipper can correct a left-to-right
+tilt mechanically instead of leaving it to the mesh.
+
+```
+G28
+Z_TILT_ADJUST
+```
+
+The stock `[z_tilt] points` work unchanged. `z_tilt` does **not** apply the probe's XY
+offsets — unlike `bed_mesh`, it treats `points` as toolhead positions — so the 24 mm
+offset doesn't put them out of reach.
+
+On the test machine this found a **0.1 mm tilt across 215 mm** and converged to 0.008 in
+one retry. Run `G29` afterwards; levelling changes the bed plane and any existing mesh is
+stale.
+
+Once it converges reliably, add it to `PRINT_START` between homing and the clean, so the
+mesh is built on a levelled bed:
+
+```
+    G28
+    Z_TILT_ADJUST
+    CLEAR_NOZZLE HOTEND={hotendtemp}
+    G29
+    VALIDATE_MESH
+```
+
+Both motors sit at the same Y, so this corrects left-right tilt only. Front-to-back tilt
+stays the mesh's job.
+
 ## Optional: fix the purge line
 
-KAMP probes only the area your part occupies, and it draws the purge line outside that
-area. The purge therefore prints on ground the printer never measured, which makes it the
-least reliable line of the print.
+**Check which prime line you actually have first.** QIDI Studio and OrcaSlicer profiles
+often draw their own in `machine_start_gcode`, in which case KAMP's `LINE_PURGE` never
+runs and none of the settings below do anything. Search your sliced file for
+`machine_start_gcode` and see whether it contains `G1 X... E...` moves.
+
+If KAMP does draw your purge: it probes only the area your part occupies, and it draws the
+purge line outside that area. The purge therefore prints on ground the printer never
+measured, which makes it the least reliable line of the print.
 
 In `~/klipper_config/Adaptive_Mesh.cfg`:
 

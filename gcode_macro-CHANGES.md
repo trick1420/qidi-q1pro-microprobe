@@ -142,6 +142,19 @@ purge prints on ground the printer never measured. These three settings extend t
 Both of the first two are required. Line 62 forces `margin_size` to `0` whenever
 `margin_enable` is `False`.
 
+## Z tilt
+
+`Z_TILT_ADJUST` works unchanged and is worth enabling. The stock `[z_tilt] points` need no
+edit: `z_tilt` does not apply the probe's XY offsets, unlike `bed_mesh`, so it treats them
+as toolhead positions and the 24 mm offset is irrelevant.
+
+On the test machine it found a 0.1 mm left-to-right tilt across 215 mm and converged to
+0.008 in one retry. Add it to `PRINT_START` between `G28` and `CLEAR_NOZZLE`.
+
+`[bed_screws]` and `[screws_tilt_adjust]` stay unused. `screws_tilt_adjust` does apply
+probe offsets, which puts its front-left screw out of reach, and with `z_tilt` working and
+a mesh range under 0.09 there is nothing for manual screw levelling to fix.
+
 ## New files
 
 `mesh_guard.cfg` reads the bed mesh after `G29` and stops the print if the numbers are
@@ -158,12 +171,13 @@ Your numbers will differ. These show what a healthy result looks like.
 
 | Value | Reading | Where it comes from |
 |---|---|---|
-| MicroProbe standoff | `1.601 mm` | `Result is z=` from `get_zoffset`, every print |
-| Stowed pin clearance | `0.76 mm` | Feeler gauge under the pin at `Z0`, minus `0.07` |
-| Pin travel | `2.36 mm` | Standoff plus clearance |
-| Bed mesh range | `0.110 mm` | `MESH CHECK` console line |
-| Bed mesh peak | `0.083 mm` | `MESH CHECK` console line |
-| Piezo sample spread | `0.007 mm` | Five samples per `get_zoffset` run |
+| MicroProbe standoff | `1.391 mm` | `Result is z=` from `get_zoffset`, every print |
+| Stowed pin clearance | `0.85 mm` | Feeler gauge under the stowed pin |
+| Pin travel | `2.24 mm` | Standoff plus clearance |
+| Z=0 accuracy | confirmed | 40 mm gauge block, nozzle touches at `G1 Z40` |
+| Bed mesh range | `0.059-0.088 mm` | `MESH CHECK` console line |
+| Piezo sample spread | `0.002 mm` | Last four of five samples per run |
+| Probe repeatability | `0.005 mm` | `PROBE_ACCURACY`, steady state after two settling probes |
 
 Watch the standoff. It is measured on every print and written to `klippy.log`. A drop of
 more than about `0.1 mm` means something is on the nozzle tip.
